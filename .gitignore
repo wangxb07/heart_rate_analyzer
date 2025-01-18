@@ -34,3 +34,17 @@ ENV/
 # Project specific
 uploads/
 *.log
+
+# Temporary files
+*.tmp
+*~
+.DS_Store
+Thumbs.db
+.temp/
+temp/
+tmp/
+
+# Flask specific
+instance/
+.webassets-cache/
+flask_session/
