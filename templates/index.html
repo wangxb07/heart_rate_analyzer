@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>心率分析器</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">心率数据分析系统</h1>
+        
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body">
+                        <form id="upload-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="heart-rate-file" class="form-label">心率数据文件</label>
+                                <input type="file" class="form-control" id="heart-rate-file" name="heart_rate_file" accept=".txt,.csv" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="breath-rate-file" class="form-label">呼吸率数据文件</label>
+                                <input type="file" class="form-control" id="breath-rate-file" name="breath_rate_file" accept=".txt,.csv" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">分析数据</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div id="loading" class="text-center mt-4 d-none">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">加载中...</span>
+                    </div>
+                    <p class="mt-2">正在分析数据，请稍候...</p>
+                </div>
+
+                <div id="results" class="mt-4 d-none">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">分析结果</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="plot"></div>
+                            
+                            <div class="row mt-4">
+                                <div class="col-md-6">
+                                    <h6>原始数据统计</h6>
+                                    <ul class="list-unstyled" id="original-stats">
+                                    </ul>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>修正后数据统计</h6>
+                                    <ul class="list-unstyled" id="corrected-stats">
+                                    </ul>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-3">
+                                <p id="reliability-info" class="alert alert-info">
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            $('#upload-form').on('submit', function(e) {
+                e.preventDefault();
+                
+                var formData = new FormData(this);
+                
+                $('#loading').removeClass('d-none');
+                $('#results').addClass('d-none');
+                
+                $.ajax({
+                    url: '/upload',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        $('#loading').addClass('d-none');
+                        $('#results').removeClass('d-none');
+                        
+                        // 绘制图表
+                        Plotly.newPlot('plot', response.plot.data, response.plot.layout);
+                        
+                        // 更新统计信息
+                        $('#original-stats').html(`
+                            <li>平均值: ${response.stats.original_stats.mean}</li>
+                            <li>标准差: ${response.stats.original_stats.std}</li>
+                            <li>最小值: ${response.stats.original_stats.min}</li>
+                            <li>最大值: ${response.stats.original_stats.max}</li>
+                        `);
+                        
+                        $('#corrected-stats').html(`
+                            <li>平均值: ${response.stats.corrected_stats.mean}</li>
+                            <li>标准差: ${response.stats.corrected_stats.std}</li>
+                            <li>最小值: ${response.stats.corrected_stats.min}</li>
+                            <li>最大值: ${response.stats.corrected_stats.max}</li>
+                        `);
+                        
+                        $('#reliability-info').text(
+                            `检测到 ${response.stats.low_reliability_points} 个低可靠性数据点 (可靠性分数 < 70)`
+                        );
+                    },
+                    error: function(xhr, status, error) {
+                        $('#loading').addClass('d-none');
+                        alert('错误: ' + (xhr.responseJSON ? xhr.responseJSON.error : error));
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
