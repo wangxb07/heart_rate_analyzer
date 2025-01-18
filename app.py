@@ -49,15 +49,15 @@ def upload_files():
                 return jsonify({'error': '文件内容为空'}), 400
                 
             # 打印调试信息
-            print("心率数据前几行:")
-            for line in heart_rate_data[:3]:
-                print(f"原始行: '{line}'")
-                print(f"分割后: {line.split('\t')}")
+            # print("心率数据前几行:")
+            # for line in heart_rate_data[:3]:
+            #     print(f"原始行: '{line}'")
+            #     print(f"分割后: {line.split('\t')}")
                 
-            print("\n呼吸率数据前几行:")
-            for line in breath_rate_data[:3]:
-                print(f"原始行: '{line}'")
-                print(f"分割后: {line.split('\t')}")
+            # print("\n呼吸率数据前几行:")
+            # for line in breath_rate_data[:3]:
+            #     print(f"原始行: '{line}'")
+            #     print(f"分割后: {line.split('\t')}")
             
             # 合并数据
             combined_data = heart_rate_data + ['这是一段 呼吸率的记录'] + breath_rate_data
