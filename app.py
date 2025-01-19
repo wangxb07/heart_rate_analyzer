@@ -174,4 +174,4 @@ def upload_files():
         return jsonify({'error': f'上传文件时出错: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=3000)
+    app.run(host='0.0.0.0', port=5000)
