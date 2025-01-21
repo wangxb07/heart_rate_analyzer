@@ -107,8 +107,6 @@ def upload_files():
                     
                     if last_timestamp is not None:
                         time_diff = abs((current_timestamp - last_timestamp).total_seconds() / 60)
-                        print(f"当前时间: {current_timestamp}, 上一时间: {last_timestamp}, 间隔: {time_diff:.1f}分钟")
-                        
                         if time_diff > 10:
                             if current_segment:
                                 print(f"发现时间间隔 {time_diff:.1f} 分钟，创建新的数据段")

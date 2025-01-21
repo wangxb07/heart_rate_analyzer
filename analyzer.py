@@ -6,10 +6,10 @@ from scipy.signal import correlate
 from io import StringIO
 
 class HeartRateAnalyzer:
-    def __init__(self, window_size=5, reliability_threshold=70, correlation_window=10, correlation_threshold=0.8):
+    def __init__(self, window_size=5, reliability_threshold=70, correlation_half_window=10, correlation_threshold=0.8):
         self.window_size = window_size
         self.reliability_threshold = reliability_threshold
-        self.correlation_window = correlation_window  # 相关性分析的窗口大小
+        self.correlation_half_window = correlation_half_window  # 相关性分析窗口的半径，实际窗口大小为 2*half_window+1
         self.correlation_threshold = correlation_threshold  # 相关性阈值
     
     def parse_datetime(self, dt_str):
@@ -50,8 +50,22 @@ class HeartRateAnalyzer:
         return heart_rate_df, breath_rate_df
 
     def calculate_hr_br_correlation(self, heart_rate_df, breath_rate_df):
-        """计算心率和呼吸率的相关性分数"""
-        # 确保两个DataFrame使用相同的时间索引
+        """计算心率和呼吸率的相关性分数
+        
+        使用滑动窗口计算局部相关性。窗口大小为 2*correlation_half_window+1，
+        即在当前点两侧各取 correlation_half_window 个点。
+        """
+        # 确保两个DataFrame都使用device_time作为索引
+        if 'device_time' not in heart_rate_df.columns:
+            heart_rate_df = heart_rate_df.reset_index().rename(columns={'index': 'device_time'})
+        if 'device_time' not in breath_rate_df.columns:
+            breath_rate_df = breath_rate_df.reset_index().rename(columns={'index': 'device_time'})
+            
+        # 设置device_time为索引
+        heart_rate_df = heart_rate_df.set_index('device_time')
+        breath_rate_df = breath_rate_df.set_index('device_time')
+        
+        # 使用时间索引合并数据
         merged_df = pd.merge(
             heart_rate_df[['heart_rate']], 
             breath_rate_df[['breath_rate']], 
@@ -68,8 +82,9 @@ class HeartRateAnalyzer:
             # 在merged_df中找到对应时间点的位置
             if idx in merged_df.index:
                 pos = merged_df.index.get_loc(idx)
-                start_idx = max(0, pos - self.correlation_window)
-                end_idx = min(len(merged_df), pos + self.correlation_window + 1)
+                # 使用半窗口大小计算实际的窗口范围
+                start_idx = max(0, pos - self.correlation_half_window)
+                end_idx = min(len(merged_df), pos + self.correlation_half_window + 1)
                 window_data = merged_df.iloc[start_idx:end_idx]
                 
                 if len(window_data) >= 3:  # 需要至少3个点才能计算相关性
@@ -140,17 +155,29 @@ class HeartRateAnalyzer:
             results = pd.DataFrame(index=heart_rate_data.index)
             results['heart_rate'] = heart_rate_data['value']
             results['breath_rate'] = aligned_breath_rate
-            results['reliability_score'] = 100  # 默认可靠性分数
+            
+            # 计算可靠性分数
+            results['reliability_score'] = self.calculate_reliability_scores(results[['heart_rate']])
             
             # 修正心率数据
             results['corrected_heart_rate'] = self.correct_heart_rate(results['heart_rate'])
             
-            # 再次过滤掉任何可能的0值或NaN
-            results = results[
+            # 计算相关性分数
+            correlations = self.calculate_hr_br_correlation(
+                results[['heart_rate']],
+                results[['breath_rate']]
+            )
+            results['correlation'] = correlations
+            
+            # 根据相关性阈值、可靠性阈值和其他条件过滤数据
+            valid = (
                 (results['heart_rate'] > 0) & 
                 (results['breath_rate'] > 0) & 
-                (results['corrected_heart_rate'] > 0)
-            ]
+                (results['corrected_heart_rate'] > 0) &
+                (results['correlation'] >= self.correlation_threshold) &
+                (results['reliability_score'] >= self.reliability_threshold)
+            )
+            results = results[valid]
             
             return results
             
@@ -185,7 +212,7 @@ class HeartRateAnalyzer:
                     'breath_rate': breath_rate_df['value']
                 }),
                 on='time',
-                tolerance=pd.Timedelta('5m'),
+                tolerance=pd.Timedelta('30s'),
                 direction='nearest'
             )
             
