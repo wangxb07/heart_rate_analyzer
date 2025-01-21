@@ -89,8 +89,13 @@ class HeartRateAnalyzer:
                 
                 if len(window_data) >= 3:  # 需要至少3个点才能计算相关性
                     try:
-                        corr, _ = pearsonr(window_data['heart_rate'], window_data['breath_rate'])
-                        correlations[idx] = abs(corr)  # 使用相关系数的绝对值
+                        # 检查数据是否为常量
+                        if (window_data['heart_rate'].nunique() == 1 or 
+                            window_data['breath_rate'].nunique() == 1):
+                            correlations[idx] = 0.0  # 如果任一数组是常量，相关系数设为0
+                        else:
+                            corr, _ = pearsonr(window_data['heart_rate'], window_data['breath_rate'])
+                            correlations[idx] = abs(corr)  # 使用相关系数的绝对值
                     except:
                         correlations[idx] = 0.0
         

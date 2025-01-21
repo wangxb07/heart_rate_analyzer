@@ -176,7 +176,7 @@ def upload_files():
                     print(f"  - 平均呼吸率: {avg_breath_rate:.1f}")
                     
                     # 检查数据质量
-                    if valid_count >= 100 and time_span >= 5:  # 至少100个点且跨度至少5分钟
+                    if valid_count >= 10 and time_span >= 1:  # 至少100个点且跨度至少5分钟
                         valid_segments.append((segment, valid_count, time_span, avg_heart_rate, avg_breath_rate))
                         print(f"  - 状态: 有效")
                     else:
