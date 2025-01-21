@@ -3,9 +3,10 @@ import numpy as np
 from datetime import datetime
 from scipy.stats import zscore, pearsonr
 from scipy.signal import correlate
+from io import StringIO
 
 class HeartRateAnalyzer:
-    def __init__(self, window_size=5, reliability_threshold=70, correlation_window=10, correlation_threshold=0.6):
+    def __init__(self, window_size=5, reliability_threshold=70, correlation_window=10, correlation_threshold=0.8):
         self.window_size = window_size
         self.reliability_threshold = reliability_threshold
         self.correlation_window = correlation_window  # 相关性分析的窗口大小
@@ -32,8 +33,8 @@ class HeartRateAnalyzer:
                 'id': int(row[0]),
                 'timestamp': self.parse_datetime(row[1]),
                 'device_time': self.parse_datetime(row[2]),
-                'heart_rate': int(row[3])
-            } for row in [line.strip().split(',') for line in heart_rate_data if line.strip()]
+                'heart_rate': int(row[3])  # 保持列名为heart_rate
+            } for row in [line.strip().split(',') for line in heart_rate_data if line.strip() and not line.startswith('id')]
         ])
         
         # 创建呼吸率DataFrame
@@ -42,8 +43,8 @@ class HeartRateAnalyzer:
                 'id': int(row[0]),
                 'timestamp': self.parse_datetime(row[1]),
                 'device_time': self.parse_datetime(row[2]),
-                'breath_rate': int(row[3])
-            } for row in [line.strip().split(',') for line in breath_rate_data if line.strip()]
+                'breath_rate': int(row[3])  # 保持列名为breath_rate
+            } for row in [line.strip().split(',') for line in breath_rate_data if line.strip() and not line.startswith('id')]
         ])
         
         return heart_rate_df, breath_rate_df
@@ -80,100 +81,193 @@ class HeartRateAnalyzer:
         
         return correlations
 
-    def calculate_reliability_score(self, row, window_stats, diffs, hr_br_correlation):
-        """计算单个数据点的可靠性分数"""
-        # 1. 基于窗口统计的分数 (0-40分)
-        window_mean = window_stats.loc[row.name, 'window_mean']
-        window_std = window_stats.loc[row.name, 'window_std']
-        z_score = abs((row['heart_rate'] - window_mean) / window_std) if window_std != 0 else 0
-        stats_score = max(0, 40 - z_score * 10)
-        
-        # 2. 基于差分的分数 (0-30分)
-        diff_score = 30
-        if row.name in diffs.index:
-            diff = abs(diffs.loc[row.name])
-            if diff > 20:  # 如果心率变化超过20，开始扣分
-                diff_score = max(0, 30 - (diff - 20))
-        
-        # 3. 基于心率-呼吸率相关性的分数 (0-30分)
-        correlation_score = hr_br_correlation * 30
-        
-        # 合并所有分数
-        total_score = stats_score + diff_score + correlation_score
-        return min(100, total_score)  # 确保分数不超过100
-    
     def filter_invalid_data(self, heart_rate_df, breath_rate_df):
-        """过滤掉无效的数据点"""
-        # 1. 过滤掉心率或呼吸率为0的数据
-        valid_heart = heart_rate_df['heart_rate'] > 0
-        valid_breath = breath_rate_df['breath_rate'] > 0
+        """过滤无效数据"""
+        # 处理心率数据
+        if not heart_rate_df.empty:
+            valid_heart = heart_rate_df['heart_rate'] > 0
+            heart_rate_df = heart_rate_df[valid_heart].copy()
         
-        heart_rate_df = heart_rate_df[valid_heart].copy()
-        breath_rate_df = breath_rate_df[valid_breath].copy()
+        # 处理呼吸率数据（如果存在）
+        if not breath_rate_df.empty and 'breath_rate' in breath_rate_df.columns:
+            valid_breath = breath_rate_df['breath_rate'] > 0
+            breath_rate_df = breath_rate_df[valid_breath].copy()
+        else:
+            # 如果没有呼吸率数据，创建一个空的DataFrame保持一致的结构
+            breath_rate_df = pd.DataFrame(columns=['id', 'timestamp', 'device_time', 'breath_rate'])
         
         return heart_rate_df, breath_rate_df
-    
+
     def analyze(self, data):
-        """分析心率数据
-        处理顺序：
-        1. 预处理数据
-        2. 过滤无效数据（零值）
-        3. 计算并过滤呼吸相关性
-        4. 对剩余数据进行可靠性分析和修正
-        """
-        # 1. 预处理数据
-        heart_rate_df, breath_rate_df = self.preprocess_data(data)
-        
-        # 2. 过滤无效数据
-        heart_rate_df, breath_rate_df = self.filter_invalid_data(heart_rate_df, breath_rate_df)
-        
-        # 3. 计算心率和呼吸率的相关性并过滤
-        hr_br_correlations = self.calculate_hr_br_correlation(heart_rate_df, breath_rate_df)
-        heart_rate_df['correlation'] = hr_br_correlations
-        
-        # 只保留相关性强的数据
-        valid_correlation = heart_rate_df['correlation'] >= self.correlation_threshold
-        heart_rate_df = heart_rate_df[valid_correlation].copy()
-        
-        # 如果过滤后没有数据，直接返回
-        if len(heart_rate_df) == 0:
-            return heart_rate_df
-        
-        # 4. 对相关性强的数据进行进一步分析
-        # 4.1 计算滑动窗口统计
-        heart_rate_df['window_mean'] = heart_rate_df['heart_rate'].rolling(
+        """分析心率和呼吸率数据"""
+        try:
+            # 分离心率和呼吸率数据
+            split_index = data.index('这是一段 呼吸率的记录')
+            heart_rate_data = pd.read_csv(StringIO('\n'.join(data[:split_index])))
+            breath_rate_data = pd.read_csv(StringIO('\n'.join(data[split_index + 1:])))
+            
+            # 确保数据帧有必要的列
+            required_columns = {
+                'heart_rate_data': ['device_time', 'value'],
+                'breath_rate_data': ['device_time', 'value']
+            }
+            
+            for df_name, columns in required_columns.items():
+                df = locals()[df_name]
+                missing_cols = [col for col in columns if col not in df.columns]
+                if missing_cols:
+                    print(f"{df_name} 缺少必要的列: {missing_cols}")
+                    return pd.DataFrame()
+            
+            # 过滤掉值为0的数据点
+            heart_rate_data = heart_rate_data[heart_rate_data['value'] > 0].copy()  # 创建副本避免警告
+            breath_rate_data = breath_rate_data[breath_rate_data['value'] > 0].copy()
+            
+            if heart_rate_data.empty or breath_rate_data.empty:
+                print("过滤0值后数据为空")
+                return pd.DataFrame()
+            
+            # 设置时间索引 (链式操作避免警告)
+            heart_rate_data = (heart_rate_data
+                             .assign(device_time=lambda x: pd.to_datetime(x['device_time']))
+                             .set_index('device_time')
+                             .sort_index())
+            
+            # 对齐呼吸率数据
+            aligned_breath_rate = self.align_breath_rate(heart_rate_data, breath_rate_data)
+            
+            # 创建结果DataFrame
+            results = pd.DataFrame(index=heart_rate_data.index)
+            results['heart_rate'] = heart_rate_data['value']
+            results['breath_rate'] = aligned_breath_rate
+            results['reliability_score'] = 100  # 默认可靠性分数
+            
+            # 修正心率数据
+            results['corrected_heart_rate'] = self.correct_heart_rate(results['heart_rate'])
+            
+            # 再次过滤掉任何可能的0值或NaN
+            results = results[
+                (results['heart_rate'] > 0) & 
+                (results['breath_rate'] > 0) & 
+                (results['corrected_heart_rate'] > 0)
+            ]
+            
+            return results
+            
+        except Exception as e:
+            print(f"分析数据时出错: {str(e)}")
+            return pd.DataFrame()
+
+    def align_breath_rate(self, heart_rate_df, breath_rate_df):
+        """将呼吸率数据对齐到心率数据的时间点"""
+        try:
+            # 检查输入数据是否为空
+            if heart_rate_df.empty or breath_rate_df.empty:
+                print("心率或呼吸率数据为空，返回空Series")
+                return pd.Series(index=heart_rate_df.index, dtype=float)
+            
+            # 打印原始数据的样本
+            print("\n=== 对齐前的数据样本 ===")
+            print("\n心率数据样本（前3条）:")
+            print(heart_rate_df.head(3))
+            print("\n呼吸率数据样本（前3条）:")
+            print(breath_rate_df[['device_time', 'value']].head(3))
+            
+            # 准备呼吸率数据
+            breath_rate_df['device_time'] = pd.to_datetime(breath_rate_df['device_time'])
+            breath_rate_df.sort_values('device_time', inplace=True)
+            
+            # 使用pandas的merge_asof进行最近邻匹配
+            merged_df = pd.merge_asof(
+                pd.DataFrame({'time': heart_rate_df.index}),
+                pd.DataFrame({
+                    'time': breath_rate_df['device_time'],
+                    'breath_rate': breath_rate_df['value']
+                }),
+                on='time',
+                tolerance=pd.Timedelta('5m'),
+                direction='nearest'
+            )
+            
+            # 创建结果Series，过滤掉0值
+            aligned_breath = pd.Series(
+                merged_df['breath_rate'].values,
+                index=heart_rate_df.index
+            )
+            aligned_breath = aligned_breath[aligned_breath > 0]
+            
+            # 打印对齐后的结果样本
+            print("\n=== 对齐后的数据样本 ===")
+            result_df = pd.DataFrame({
+                'device_time': heart_rate_df.index,
+                'heart_rate': heart_rate_df['value'],
+                'breath_rate': aligned_breath
+            })
+            print("\n对齐后的数据（前3条）:")
+            print(result_df.head(3))
+            
+            # 打印一些统计信息
+            print("\n=== 数据统计 ===")
+            print(f"心率数据点数: {len(heart_rate_df)}")
+            print(f"呼吸率原始数据点数: {len(breath_rate_df)}")
+            print(f"对齐后的数据点数: {len(aligned_breath)}")
+            print(f"对齐后的非空数据点数: {aligned_breath.notna().sum()}")
+            print(f"对齐率: {(aligned_breath.notna().sum() / len(aligned_breath)) * 100:.2f}%")
+            
+            return aligned_breath
+            
+        except Exception as e:
+            print(f"对齐呼吸率数据时出错: {str(e)}")
+            return pd.Series(index=heart_rate_df.index, dtype=float)
+
+    def calculate_reliability_scores(self, heart_rate_df):
+        """计算心率数据的可靠性分数"""
+        # 使用移动窗口计算统计数据
+        window_mean = heart_rate_df['heart_rate'].rolling(
             window=self.window_size, center=True, min_periods=1
         ).mean()
-        heart_rate_df['window_std'] = heart_rate_df['heart_rate'].rolling(
+        window_std = heart_rate_df['heart_rate'].rolling(
             window=self.window_size, center=True, min_periods=1
         ).std()
-        window_stats = heart_rate_df[['window_mean', 'window_std']]
         
-        # 4.2 计算差分
+        # 计算差分
         diffs = heart_rate_df['heart_rate'].diff()
         
-        # 4.3 计算可靠性分数
-        heart_rate_df['reliability_score'] = heart_rate_df.apply(
-            lambda row: self.calculate_reliability_score(
-                row, 
-                window_stats, 
-                diffs,
-                hr_br_correlations[row.name]
-            ), 
-            axis=1
-        )
+        # 计算每个点的可靠性分数
+        scores = []
+        for i in range(len(heart_rate_df)):
+            # 获取当前点的统计数据
+            mean = window_mean.iloc[i]
+            std = window_std.iloc[i] if not pd.isna(window_std.iloc[i]) else 0
+            diff = abs(diffs.iloc[i]) if i > 0 else 0
+            
+            # 计算分数
+            score = 100
+            
+            # 基于与窗口均值的偏差
+            if mean > 0:  # 避免除以零
+                deviation = abs(heart_rate_df['heart_rate'].iloc[i] - mean) / mean
+                score -= min(30, deviation * 100)
+            
+            # 基于窗口标准差
+            if mean > 0:  # 避免除以零
+                score -= min(30, (std / mean) * 100)
+            
+            # 基于与前一个点的差异
+            if mean > 0:  # 避免除以零
+                score -= min(40, (diff / mean) * 100)
+            
+            scores.append(max(0, min(100, score)))
         
-        # 4.4 修正不可靠的数据点
-        heart_rate_df['corrected_heart_rate'] = heart_rate_df.apply(
-            lambda row: row['window_mean'] if row['reliability_score'] < self.reliability_threshold 
-            else row['heart_rate'],
-            axis=1
-        )
+        return scores
+
+    def apply_moving_average(self, series, window_size=5):
+        """应用移动平均来平滑数据"""
+        return series.rolling(window=window_size, center=True, min_periods=1).mean()
+
+    def correct_heart_rate(self, heart_rate):
+        """修正心率数据"""
+        # 使用移动平均来平滑心率数据
+        smoothed_heart_rate = self.apply_moving_average(heart_rate)
         
-        # 5. 添加呼吸率数据到结果中
-        heart_rate_df['breath_rate'] = pd.Series(dtype=float)
-        for idx in heart_rate_df.index:
-            if idx in breath_rate_df.index:
-                heart_rate_df.at[idx, 'breath_rate'] = breath_rate_df.at[idx, 'breath_rate']
-        
-        return heart_rate_df
+        return smoothed_heart_rate
