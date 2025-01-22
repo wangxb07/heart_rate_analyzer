@@ -298,6 +298,13 @@ def upload_files():
             
             # 生成统计报告（合并所有段的数据）
             all_results = pd.concat([analyzer.analyze(segment) for segment, _, _, _, _ in valid_segments])
+            
+            # 评估数据质量
+            quality_metrics = analyzer.evaluate_data_quality(
+                all_results[['heart_rate']].rename(columns={'heart_rate': 'heart_rate'}),
+                all_results[['breath_rate']].rename(columns={'breath_rate': 'breath_rate'})
+            )
+            
             stats = {
                 'original_stats': {
                     'mean': float(round(all_results['heart_rate'].mean(), 2)),
@@ -330,7 +337,8 @@ def upload_files():
             
             return jsonify({
                 'plot': json.loads(plotly.utils.PlotlyJSONEncoder().encode(fig)),
-                'stats': stats
+                'stats': stats,
+                'quality_metrics': quality_metrics
             })
             
         except Exception as e:

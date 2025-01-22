@@ -63,6 +63,58 @@
                                 <p id="reliability-info" class="alert alert-info">
                                 </p>
                             </div>
+                            
+                            <div class="mt-4">
+                                <h5>数据质量评估</h5>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="card mb-3">
+                                            <div class="card-header">
+                                                <h6 class="mb-0">数据完整性</h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <ul class="list-unstyled" id="data-completeness">
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="card mb-3">
+                                            <div class="card-header">
+                                                <h6 class="mb-0">数据有效性</h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <ul class="list-unstyled" id="data-validity">
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="card mb-3">
+                                            <div class="card-header">
+                                                <h6 class="mb-0">数据稳定性</h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <ul class="list-unstyled" id="data-stability">
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="card mb-3">
+                                            <div class="card-header">
+                                                <h6 class="mb-0">数据相关性</h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <ul class="list-unstyled" id="data-correlation">
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -108,9 +160,41 @@
                             <li>最大值: ${response.stats.corrected_stats.max}</li>
                         `);
                         
-                        $('#reliability-info').text(
-                            `检测到 ${response.stats.low_reliability_points} 个低可靠性数据点 (可靠性分数 < 70)`
-                        );
+                        $('#reliability-info').html(`
+                            发现 ${response.stats.low_reliability_points} 个低可靠性数据点
+                            (共 ${response.stats.segment_count} 个数据段)
+                        `);
+                        
+                        // 更新数据质量评估结果
+                        $('#data-completeness').html(`
+                            <li>总时长: ${response.quality_metrics['数据完整性']['总时长(分钟)']} 分钟</li>
+                            <li>心率数据:</li>
+                            <ul>
+                                <li>数据点数: ${response.quality_metrics['数据完整性']['心率数据点数']}</li>
+                                <li>平均采样间隔: ${response.quality_metrics['数据完整性']['心率平均采样间隔(秒)']} 秒</li>
+                                <li>数据完整度: ${response.quality_metrics['数据完整性']['心率数据完整度']}%</li>
+                            </ul>
+                            <li>呼吸率数据:</li>
+                            <ul>
+                                <li>数据点数: ${response.quality_metrics['数据完整性']['呼吸率数据点数']}</li>
+                                <li>平均采样间隔: ${response.quality_metrics['数据完整性']['呼吸率平均采样间隔(秒)']} 秒</li>
+                                <li>数据完整度: ${response.quality_metrics['数据完整性']['呼吸率数据完整度']}%</li>
+                            </ul>
+                        `);
+                        
+                        $('#data-validity').html(`
+                            <li>有效心率数据比例: ${response.quality_metrics['数据有效性']['有效心率数据比例']}%</li>
+                            <li>有效呼吸率数据比例: ${response.quality_metrics['数据有效性']['有效呼吸率数据比例']}%</li>
+                        `);
+                        
+                        $('#data-stability').html(`
+                            <li>心率标准差: ${response.quality_metrics['数据稳定性']['心率标准差']}</li>
+                            <li>呼吸率标准差: ${response.quality_metrics['数据稳定性']['呼吸率标准差']}</li>
+                        `);
+                        
+                        $('#data-correlation').html(`
+                            <li>心率-呼吸率相关性得分: ${response.quality_metrics['数据相关性']['心率-呼吸率相关性得分']}</li>
+                        `);
                     },
                     error: function(xhr, status, error) {
                         $('#loading').addClass('d-none');
