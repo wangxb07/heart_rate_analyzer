@@ -67,48 +67,13 @@
                             <div class="mt-4">
                                 <h5>数据质量评估</h5>
                                 <div class="row">
-                                    <div class="col-md-6">
+                                    <div class="col-md-12">
                                         <div class="card mb-3">
                                             <div class="card-header">
                                                 <h6 class="mb-0">数据完整性</h6>
                                             </div>
                                             <div class="card-body">
                                                 <ul class="list-unstyled" id="data-completeness">
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="card mb-3">
-                                            <div class="card-header">
-                                                <h6 class="mb-0">数据有效性</h6>
-                                            </div>
-                                            <div class="card-body">
-                                                <ul class="list-unstyled" id="data-validity">
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="card mb-3">
-                                            <div class="card-header">
-                                                <h6 class="mb-0">数据稳定性</h6>
-                                            </div>
-                                            <div class="card-body">
-                                                <ul class="list-unstyled" id="data-stability">
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="card mb-3">
-                                            <div class="card-header">
-                                                <h6 class="mb-0">数据相关性</h6>
-                                            </div>
-                                            <div class="card-body">
-                                                <ul class="list-unstyled" id="data-correlation">
                                                 </ul>
                                             </div>
                                         </div>
@@ -166,35 +131,47 @@
                         `);
                         
                         // 更新数据质量评估结果
-                        $('#data-completeness').html(`
-                            <li>总时长: ${response.quality_metrics['数据完整性']['总时长(分钟)']} 分钟</li>
-                            <li>心率数据:</li>
-                            <ul>
-                                <li>数据点数: ${response.quality_metrics['数据完整性']['心率数据点数']}</li>
-                                <li>平均采样间隔: ${response.quality_metrics['数据完整性']['心率平均采样间隔(秒)']} 秒</li>
-                                <li>数据完整度: ${response.quality_metrics['数据完整性']['心率数据完整度']}%</li>
-                            </ul>
-                            <li>呼吸率数据:</li>
-                            <ul>
-                                <li>数据点数: ${response.quality_metrics['数据完整性']['呼吸率数据点数']}</li>
-                                <li>平均采样间隔: ${response.quality_metrics['数据完整性']['呼吸率平均采样间隔(秒)']} 秒</li>
-                                <li>数据完整度: ${response.quality_metrics['数据完整性']['呼吸率数据完整度']}%</li>
-                            </ul>
-                        `);
+                        let completenessHtml = `
+                            <li><strong>总段数：${response.quality_metrics['总段数']}</strong></li>
+                        `;
                         
-                        $('#data-validity').html(`
-                            <li>有效心率数据比例: ${response.quality_metrics['数据有效性']['有效心率数据比例']}%</li>
-                            <li>有效呼吸率数据比例: ${response.quality_metrics['数据有效性']['有效呼吸率数据比例']}%</li>
-                        `);
+                        // 添加每个段落的详情
+                        response.quality_metrics['段落详情'].forEach(segment => {
+                            completenessHtml += `
+                                <li><strong>段落 ${segment['段落编号']} 详情：</strong></li>
+                                <ul>
+                                    <li>总时长: ${segment['数据完整性']['总时长(分钟)']} 分钟</li>
+                                    <li>心率数据点数: ${segment['数据完整性']['心率数据点数']}</li>
+                                    <li>呼吸率数据点数: ${segment['数据完整性']['呼吸率数据点数']}</li>
+                                    <li>心率平均采样间隔: ${segment['数据完整性']['心率平均采样间隔(秒)']} 秒</li>
+                                    <li>呼吸率平均采样间隔: ${segment['数据完整性']['呼吸率平均采样间隔(秒)']} 秒</li>
+                                    <li>心率数据完整度: ${segment['数据完整性']['心率数据完整度']}%</li>
+                                    <li>呼吸率数据完整度: ${segment['数据完整性']['呼吸率数据完整度']}%</li>
+                                </ul>
+                                
+                                <li><strong>数据有效性：</strong></li>
+                                <ul>
+                                    <li>有效心率数据比例: ${segment['数据有效性']['有效心率数据比例']}%</li>
+                                    <li>有效呼吸率数据比例: ${segment['数据有效性']['有效呼吸率数据比例']}%</li>
+                                </ul>
+                                
+                                <li><strong>数据稳定性：</strong></li>
+                                <ul>
+                                    <li>心率标准差: ${segment['数据稳定性']['心率标准差']}</li>
+                                    <li>呼吸率标准差: ${segment['数据稳定性']['呼吸率标准差']}</li>
+                                </ul>
+                                
+                                <li><strong>数据相关性：</strong></li>
+                                <ul>
+                                    <li>心率-呼吸率相关性得分: ${segment['数据相关性']['心率-呼吸率相关性得分']}</li>
+                                </ul>
+                            `;
+                        });
                         
-                        $('#data-stability').html(`
-                            <li>心率标准差: ${response.quality_metrics['数据稳定性']['心率标准差']}</li>
-                            <li>呼吸率标准差: ${response.quality_metrics['数据稳定性']['呼吸率标准差']}</li>
-                        `);
-                        
-                        $('#data-correlation').html(`
-                            <li>心率-呼吸率相关性得分: ${response.quality_metrics['数据相关性']['心率-呼吸率相关性得分']}</li>
-                        `);
+                        $('#data-completeness').html(completenessHtml);
+                        $('#data-validity').html('');  // 清空其他区域，因为现在所有信息都在completeness中显示
+                        $('#data-stability').html('');
+                        $('#data-correlation').html('');
                     },
                     error: function(xhr, status, error) {
                         $('#loading').addClass('d-none');

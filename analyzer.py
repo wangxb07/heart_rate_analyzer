@@ -362,23 +362,76 @@ class HeartRateAnalyzer:
         返回：
             dict: 包含各项质量指标的字典
         """
+        # 检测数据段
+        time_gaps = heart_rate_df.index.to_series().diff().dt.total_seconds()
+        segment_threshold = 60  # 60秒以上的间隔视为不同段
+        
+        # 找出大于阈值的时间差的位置
+        gap_positions = time_gaps[time_gaps > segment_threshold].index
+        
+        # 如果没有大于阈值的时间差，整个数据集作为一段
+        if len(gap_positions) == 0:
+            metrics = self._evaluate_single_segment(heart_rate_df, breath_rate_df, 1)
+            metrics['总段数'] = 1
+            return metrics
+            
+        # 分段处理数据
+        segments = []
+        start_idx = 0
+        segment_number = 1
+        all_metrics = []
+        
+        # 处理每一段数据
+        for gap_pos in gap_positions:
+            current_pos = heart_rate_df.index.get_indexer([gap_pos])[0]
+            # 提取当前段的数据
+            hr_segment = heart_rate_df.iloc[start_idx:current_pos]
+            br_segment = breath_rate_df.iloc[start_idx:current_pos]
+            
+            if len(hr_segment) > 0 and len(br_segment) > 0:
+                metrics = self._evaluate_single_segment(hr_segment, br_segment, segment_number)
+                all_metrics.append(metrics)
+                segment_number += 1
+            
+            start_idx = current_pos + 1
+        
+        # 处理最后一段数据
+        hr_segment = heart_rate_df.iloc[start_idx:]
+        br_segment = breath_rate_df.iloc[start_idx:]
+        if len(hr_segment) > 0 and len(br_segment) > 0:
+            metrics = self._evaluate_single_segment(hr_segment, br_segment, segment_number)
+            all_metrics.append(metrics)
+        
+        # 合并所有段的结果
+        combined_metrics = {
+            '总段数': len(all_metrics),
+            '段落详情': all_metrics
+        }
+        
+        return combined_metrics
+        
+    def _evaluate_single_segment(self, heart_rate_df, breath_rate_df, segment_number):
+        """评估单个数据段的质量"""
         quality_metrics = {}
         
+        # 添加段落编号
+        quality_metrics['段落编号'] = segment_number
+        
         # 1. 数据完整性检查
-        total_duration = (heart_rate_df.index[-1] - heart_rate_df.index[0]).total_seconds() / 60  # 转换为分钟
+        total_duration = abs((heart_rate_df.index[-1] - heart_rate_df.index[0]).total_seconds() / 60)
         heart_rate_count = len(heart_rate_df)
         breath_rate_count = len(breath_rate_df)
         
         # 计算预期数据点数：假设每5秒一个数据点
-        expected_points_per_minute = 12  # 每分钟应该有12个数据点（每5秒一个）
-        expected_count = total_duration * expected_points_per_minute
+        expected_points_per_minute = 12
+        expected_count = max(1, total_duration * expected_points_per_minute)  # 避免除以0
         
         # 计算实际的平均采样间隔（秒）
         hr_time_diffs = pd.Series(heart_rate_df.index).diff().dt.total_seconds()
         br_time_diffs = pd.Series(breath_rate_df.index).diff().dt.total_seconds()
         
-        hr_avg_interval = hr_time_diffs.mean()
-        br_avg_interval = br_time_diffs.mean()
+        hr_avg_interval = abs(hr_time_diffs.mean()) if not pd.isna(hr_time_diffs.mean()) else 0
+        br_avg_interval = abs(br_time_diffs.mean()) if not pd.isna(br_time_diffs.mean()) else 0
         
         quality_metrics['数据完整性'] = {
             '总时长(分钟)': round(total_duration, 2),
@@ -401,8 +454,8 @@ class HeartRateAnalyzer:
         ]
         
         quality_metrics['数据有效性'] = {
-            '有效心率数据比例': round((len(heart_rate_valid) / len(heart_rate_df)) * 100, 2),
-            '有效呼吸率数据比例': round((len(breath_rate_valid) / len(breath_rate_df)) * 100, 2)
+            '有效心率数据比例': round((len(heart_rate_valid) / max(1, len(heart_rate_df))) * 100, 2),
+            '有效呼吸率数据比例': round((len(breath_rate_valid) / max(1, len(breath_rate_df))) * 100, 2)
         }
         
         # 3. 数据稳定性检查
@@ -410,13 +463,14 @@ class HeartRateAnalyzer:
         breath_rate_std = breath_rate_df['breath_rate'].std()
         
         quality_metrics['数据稳定性'] = {
-            '心率标准差': round(float(heart_rate_std), 2),  # 确保是float
-            '呼吸率标准差': round(float(breath_rate_std), 2)  # 确保是float
+            '心率标准差': round(float(heart_rate_std if not pd.isna(heart_rate_std) else 0), 2),
+            '呼吸率标准差': round(float(breath_rate_std if not pd.isna(breath_rate_std) else 0), 2)
         }
         
         # 4. 数据相关性
         correlations = self.calculate_hr_br_correlation(heart_rate_df, breath_rate_df)
-        mean_correlation = float(correlations.mean())  # 计算平均相关性并转换为float
+        mean_correlation = float(correlations.mean() if not pd.isna(correlations.mean()) else 0)
+        
         quality_metrics['数据相关性'] = {
             '心率-呼吸率相关性得分': round(mean_correlation, 2)
         }
