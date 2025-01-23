@@ -163,23 +163,32 @@ class HeartRateAnalyzer:
             
             # 设置时间索引
             print("\n=== 处理时间索引 ===")
-            heart_rate_data = (heart_rate_data
-                             .assign(device_time=lambda x: pd.to_datetime(x['device_time']))
-                             .set_index('device_time')
-                             .sort_index())
-            
-            print(f"设置时间索引后心率数据行数: {len(heart_rate_data)}")
-            print("心率数据时间范围:", heart_rate_data.index.min(), "至", heart_rate_data.index.max())
-            
-            # 对齐呼吸率数据
-            print("\n=== 开始对齐呼吸率数据 ===")
-            aligned_breath_rate = self.align_breath_rate(heart_rate_data, breath_rate_data)
-            print(f"对齐后的呼吸率数据点数: {len(aligned_breath_rate)}")
-            
-            # 创建结果DataFrame
-            results = pd.DataFrame(index=heart_rate_data.index)
-            results['heart_rate'] = heart_rate_data['value']
-            results['breath_rate'] = aligned_breath_rate
+            try:
+                # 检查是否存在重复的时间戳
+                heart_rate_data['device_time'] = pd.to_datetime(heart_rate_data['device_time'])
+                if heart_rate_data['device_time'].duplicated().any():
+                    print("警告：发现重复的时间戳，将保留最后一个值")
+                    # 对重复的时间戳保留最后一个值
+                    heart_rate_data = heart_rate_data.sort_values('device_time').drop_duplicates('device_time', keep='last')
+                
+                heart_rate_data = heart_rate_data.set_index('device_time').sort_index()
+                
+                print(f"设置时间索引后心率数据行数: {len(heart_rate_data)}")
+                print("心率数据时间范围:", heart_rate_data.index.min(), "至", heart_rate_data.index.max())
+                
+                # 对齐呼吸率数据
+                print("\n=== 开始对齐呼吸率数据 ===")
+                aligned_breath_rate = self.align_breath_rate(heart_rate_data, breath_rate_data)
+                print(f"对齐后的呼吸率数据点数: {len(aligned_breath_rate)}")
+                
+                # 创建结果DataFrame，确保索引唯一
+                results = pd.DataFrame(index=heart_rate_data.index)
+                results['heart_rate'] = heart_rate_data['value']
+                results['breath_rate'] = aligned_breath_rate
+                
+            except Exception as e:
+                print(f"处理数据时出错: {str(e)}")
+                return pd.DataFrame()  # 返回空DataFrame表示处理失败
             
             # 计算可靠性分数
             results['reliability_score'] = self.calculate_reliability_scores(results[['heart_rate']])
