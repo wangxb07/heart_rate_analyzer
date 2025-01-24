@@ -7,13 +7,13 @@ from io import StringIO
 import signal
 
 class HeartRateAnalyzer:
-    def __init__(self, window_size=15, reliability_threshold=70, correlation_half_window=30, correlation_threshold=0.6):
+    def __init__(self, window_size=15, reliability_threshold=70, correlation_half_window=30, correlation_threshold=0.3):
         self.window_size = window_size
         self.reliability_threshold = reliability_threshold
         self.correlation_half_window = correlation_half_window  # 相关性分析窗口的半径，实际窗口大小为 2*half_window+1
-        self.correlation_threshold = correlation_threshold  # 相关性阈值
-        self.max_time_gap = 60  # 最大允许的时间间隔（秒）
+        self.normal_heart_rate = 68  # 正常心率值
         self.min_correlation_threshold = 0.2  # 最低相关性阈值
+        self.max_time_gap = 60  # 最大允许的时间间隔（秒）
 
     def parse_datetime(self, dt_str):
         """处理时间字符串，移除多余的引号"""
@@ -78,7 +78,7 @@ class HeartRateAnalyzer:
         过滤规则：
         1. 心率必须大于0
         2. 呼吸率必须大于0
-        3. 呼吸率必须在11-25之间（不包含11和25）
+        3. 呼吸率必须在12-24之间（不包含12和24）
         4. 如果某个时间点的呼吸率无效，对应的心率数据也会被过滤
         5. 所有列都不能包含NaN值
         """
@@ -93,8 +93,8 @@ class HeartRateAnalyzer:
         if 'breath_rate' in breath_rate_df.columns:
             valid_breath = (
                 (breath_rate_df['breath_rate'] > 0) & 
-                (breath_rate_df['breath_rate'] > 11) & 
-                (breath_rate_df['breath_rate'] < 25) & 
+                (breath_rate_df['breath_rate'] > 12) & 
+                (breath_rate_df['breath_rate'] < 24) & 
                 (~breath_rate_df.isna().any(axis=1))
             )
             breath_rate_df = breath_rate_df[valid_breath].copy()
@@ -139,8 +139,8 @@ class HeartRateAnalyzer:
         
         # 使用时间索引合并数据
         merged_df = pd.merge(
-            heart_rate_df[['heart_rate']], 
-            breath_rate_df[['breath_rate']], 
+            heart_rate_df[['corrected_heart_rate']], 
+            breath_rate_df[['corrected_breath_rate']], 
             left_index=True, 
             right_index=True,
             how='inner'
@@ -149,8 +149,8 @@ class HeartRateAnalyzer:
         # 计算相关性
         window_size = 2 * self.correlation_half_window + 1
         correlations = self._calculate_rolling_correlation(
-            merged_df['heart_rate'],
-            merged_df['breath_rate'],
+            merged_df['corrected_heart_rate'],
+            merged_df['corrected_breath_rate'],
             window_size
         )
         
@@ -170,7 +170,10 @@ class HeartRateAnalyzer:
         return heart_rate_df, breath_rate_df
     
     def _calculate_rolling_correlation(self, series1, series2, window_size):
-        """计算滚动相关性"""
+        """计算滚动相关性
+        
+        只保留正相关，负相关被视为无效（设为0）
+        """
         correlations = series1.rolling(
             window=window_size,
             min_periods=3,
@@ -182,7 +185,10 @@ class HeartRateAnalyzer:
         std2 = series2.rolling(window=window_size, min_periods=3, center=True).std()
         correlations = correlations.where((std1 > 0) & (std2 > 0), 0.0)
         
-        return correlations.fillna(0.0).abs()
+        # 将负相关设为0，只保留正相关
+        correlations = correlations.where(correlations > 0, 0.0)
+        
+        return correlations.fillna(0.0)
 
     def analyze(self, data):
         """分析心率和呼吸率数据"""
@@ -205,43 +211,62 @@ class HeartRateAnalyzer:
                 results['device_time'] = heart_rate_df['device_time']
                 results['heart_rate'] = heart_rate_df['heart_rate']
                 results['breath_rate'] = breath_rate_df['breath_rate']
+                print("\n1. 初始DataFrame:")
+                print(results.head())
                 
                 # 设置时间戳为索引
                 results = results.set_index('device_time')
                 
+                # 确保没有NaN值
+                results = results.ffill().bfill()
+                
                 # 确保结果按时间排序
                 results = results.sort_index()
+                print("\n2. 设置索引后的DataFrame:")
+                print(results.head())
+                
+                # 修正呼吸率数据
+                results['corrected_breath_rate'] = self.correct_breath_rate(results['breath_rate'])
                 
                 # 计算可靠性分数
                 results['reliability_score'] = self.calculate_reliability_scores(results[['heart_rate']])
+                print("\n3. 添加可靠性分数后的DataFrame:")
+                print(results.head())
                 
                 # 修正心率数据
                 results['corrected_heart_rate'] = self.correct_heart_rate(results['heart_rate'])
-                
-                # 确保没有NaN值
-                results = results.ffill().bfill()
+                print("\n4. 添加修正后心率的DataFrame:")
+                print(results.head())
                 
                 # 临时重置索引以访问device_time列
                 results_with_time = results.reset_index()
                 
                 # 计算相关性分数
                 correlations = self.calculate_hr_br_correlation(
-                    results_with_time[['device_time', 'heart_rate']],
-                    results_with_time[['device_time', 'breath_rate']]
+                    results_with_time[['device_time', 'corrected_heart_rate']],
+                    results_with_time[['device_time', 'corrected_breath_rate']]
                 )
                 
                 # 将相关性结果添加到DataFrame中
                 results['correlation'] = correlations
                 results['correlation'] = results['correlation'].fillna(0)  # 填充NaN值
+                print("\n5. 添加相关性分数后的DataFrame:")
+                print(results.head())
                 
-                # 根据相关性过滤数据
-                valid_correlation = results['correlation'] >= self.min_correlation_threshold
-                results = results[valid_correlation].copy()
+                # 计算每个点的动态相关性阈值
+                results['dynamic_correlation_threshold'] = results['heart_rate'].apply(self._calculate_dynamic_correlation_threshold)
+                
+                # 根据可靠性和动态相关性阈值一起过滤数据
+                valid_data = (
+                    (results['reliability_score'] >= self.reliability_threshold) &
+                    (results['correlation'] >= results['dynamic_correlation_threshold'])
+                )
+                results = results[valid_data].copy()
                 
                 # 标记数据质量
-                results['data_quality'] = 'medium'
-                high_correlation_mask = results['correlation'] >= self.correlation_threshold
-                results.loc[high_correlation_mask, 'data_quality'] = 'high'
+                results['data_quality'] = 'high'  # 因为我们已经过滤掉了所有低质量数据
+                print("\n6. 最终过滤后的DataFrame:")
+                print(results.head())
                 
                 return results
                 
@@ -270,6 +295,23 @@ class HeartRateAnalyzer:
         final_heart_rate = smoothed_heart_rate.ewm(span=self.window_size).mean()
         
         return final_heart_rate
+
+    def correct_breath_rate(self, breath_rate):
+        """修正呼吸率数据，使用指数加权移动平均
+        
+        Args:
+            breath_rate: 原始呼吸率数据Series
+            
+        Returns:
+            平滑后的呼吸率数据Series
+        """
+        # 先使用简单移动平均去除极端值
+        smoothed_breath_rate = self.apply_moving_average(breath_rate)
+        
+        # 再使用指数加权移动平均获得更平滑的结果
+        final_breath_rate = smoothed_breath_rate.ewm(span=self.window_size).mean()
+        
+        return final_breath_rate
 
     def apply_moving_average(self, series, window_size=5):
         """应用移动平均来平滑数据"""
@@ -364,7 +406,11 @@ class HeartRateAnalyzer:
         # 添加段落编号
         quality_metrics['段落编号'] = segment_number
         
-        # 4. 先计算相关性并过滤数据
+        # 先对数据进行平滑处理
+        heart_rate_df['corrected_heart_rate'] = self.correct_heart_rate(heart_rate_df['heart_rate'])
+        breath_rate_df['corrected_breath_rate'] = self.correct_breath_rate(breath_rate_df['breath_rate'])
+        
+        # 计算相关性并过滤数据
         correlations = self.calculate_hr_br_correlation(heart_rate_df.reset_index(), breath_rate_df.reset_index())
         correlations = correlations.fillna(0)  # 填充NaN值
         
@@ -456,9 +502,12 @@ class HeartRateAnalyzer:
             '呼吸率标准差': round(float(breath_rate_std if not pd.isna(breath_rate_std) else 0), 2)
         }
         
+        # 计算每个点的动态相关性阈值
+        dynamic_thresholds = heart_rate_df['heart_rate'].apply(self._calculate_dynamic_correlation_threshold)
+        
         # 计算不同相关性水平的比例
-        high_correlation = filtered_correlations >= self.correlation_threshold
-        medium_correlation = (filtered_correlations >= self.min_correlation_threshold) & (filtered_correlations < self.correlation_threshold)
+        high_correlation = filtered_correlations >= dynamic_thresholds
+        medium_correlation = (filtered_correlations >= self.min_correlation_threshold) & (filtered_correlations < dynamic_thresholds)
         low_correlation = filtered_correlations < self.min_correlation_threshold
         
         total_points = len(filtered_correlations)
@@ -474,3 +523,30 @@ class HeartRateAnalyzer:
         }
         
         return quality_metrics
+
+    def _calculate_dynamic_correlation_threshold(self, heart_rate):
+        """计算动态相关性阈值
+        
+        基于心率与正常心率（68）的偏离程度来计算相关性阈值。
+        心率越偏离正常值，要求的相关性阈值越高。
+        
+        Args:
+            heart_rate: 当前心率值
+            
+        Returns:
+            float: 动态计算的相关性阈值
+        """
+        # 计算与正常心率的偏差百分比
+        deviation = abs(heart_rate - self.normal_heart_rate) / self.normal_heart_rate
+        
+        # 基础阈值为0.3，最大阈值为0.9
+        base_threshold = 0.3
+        max_threshold = 0.9
+        
+        # 使用幂函数计算阈值
+        # 幂指数增加到8使曲线更陡峭
+        # 缩放因子改为0.3，这样30%偏差时就接近最大值
+        threshold = base_threshold + (max_threshold - base_threshold) * min(1, (deviation / 0.3) ** 11)
+        
+        # 确保阈值在合理范围内
+        return min(max(threshold, base_threshold), max_threshold)

@@ -276,6 +276,34 @@ def upload_files():
                     ),
                     row=row, col=1, secondary_y=True
                 )
+
+                # 添加可靠性评分
+                fig.add_trace(
+                    go.Scatter(
+                        x=results.index,
+                        y=results['reliability_score'],
+                        name=f'可靠性评分 (段 {segment_idx + 1})',
+                        mode='lines',
+                        line=dict(color='purple', dash='dot'),
+                        opacity=0.5,
+                        yaxis='y3'
+                    ),
+                    row=row, col=1, secondary_y=True
+                )
+
+                # 添加相关性评分
+                fig.add_trace(
+                    go.Scatter(
+                        x=results.index,
+                        y=results['correlation'] * 100,  # 转换为百分比
+                        name=f'相关性评分 (段 {segment_idx + 1})',
+                        mode='lines',
+                        line=dict(color='orange', dash='dot'),
+                        opacity=0.5,
+                        yaxis='y3'
+                    ),
+                    row=row, col=1, secondary_y=True
+                )
             
             # 更新布局
             fig.update_layout(
@@ -291,10 +319,12 @@ def upload_files():
                 hovermode='x unified'
             )
             
-            # 为每个子图设置y轴标题
+            # 为每个子图设置y轴标题和范围
             for i in range(len(segments_to_plot)):
                 fig.update_yaxes(title_text="心率 (次/分钟)", secondary_y=False, row=i+1, col=1)
-                fig.update_yaxes(title_text="呼吸率 (次/分钟)", secondary_y=True, row=i+1, col=1)
+                fig.update_yaxes(title_text="呼吸率 (次/分钟)", secondary_y=True, row=i+1, col=1, range=[0, 30])
+                # 添加评分的y轴范围
+                fig.update_yaxes(secondary_y=True, row=i+1, col=1, range=[0, 100])
             
             # 生成统计报告（合并所有段的数据）
             all_results = pd.concat([analyzer.analyze(segment) for segment, _, _, _, _ in valid_segments])
