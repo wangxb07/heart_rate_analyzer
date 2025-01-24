@@ -331,6 +331,92 @@ def upload_files():
                 # 添加评分的y轴范围
                 fig.update_yaxes(secondary_y=True, row=i+1, col=1, range=[0, 100])
             
+            # 生成心率K线图数据
+            heart_rate_candlestick = analyzer.generate_candlestick_data(all_results, 'heart_rate')
+            
+            # 生成呼吸率K线图数据
+            breath_rate_candlestick = analyzer.generate_candlestick_data(all_results, 'breath_rate')
+            
+            # 创建心率K线图的trace
+            heart_rate_plot = {
+                'data': [
+                    {
+                        'x': heart_rate_candlestick.index.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+                        'open': heart_rate_candlestick['open'].round(2).tolist(),
+                        'high': heart_rate_candlestick['high'].round(2).tolist(),
+                        'low': heart_rate_candlestick['low'].round(2).tolist(),
+                        'close': heart_rate_candlestick['close'].round(2).tolist(),
+                        'type': 'candlestick',
+                        'name': '心率K线'
+                    },
+                    {
+                        'x': heart_rate_candlestick.index.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+                        'y': heart_rate_candlestick['avg'].round(2).tolist(),
+                        'type': 'scatter',
+                        'mode': 'lines',
+                        'name': '平均心率',
+                        'line': {'color': 'blue', 'width': 1}
+                    },
+                    {
+                        'x': all_results.index.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+                        'y': all_results['heart_rate'].round(2).tolist(),
+                        'type': 'scatter',
+                        'mode': 'lines',
+                        'name': '原始心率',
+                        'line': {'color': 'gray', 'width': 1}
+                    }
+                ],
+                'layout': {
+                    'title': '心率K线分析 (10分钟间隔)',
+                    'xaxis': {
+                        'title': '时间',
+                        'rangeslider': {'visible': True}
+                    },
+                    'yaxis': {'title': '心率'},
+                    'legend': {'orientation': 'h', 'y': -0.2}
+                }
+            }
+
+            # 创建呼吸率K线图的trace
+            breath_rate_plot = {
+                'data': [
+                    {
+                        'x': breath_rate_candlestick.index.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+                        'open': breath_rate_candlestick['open'].round(2).tolist(),
+                        'high': breath_rate_candlestick['high'].round(2).tolist(),
+                        'low': breath_rate_candlestick['low'].round(2).tolist(),
+                        'close': breath_rate_candlestick['close'].round(2).tolist(),
+                        'type': 'candlestick',
+                        'name': '呼吸率K线'
+                    },
+                    {
+                        'x': breath_rate_candlestick.index.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+                        'y': breath_rate_candlestick['avg'].round(2).tolist(),
+                        'type': 'scatter',
+                        'mode': 'lines',
+                        'name': '平均呼吸率',
+                        'line': {'color': 'blue', 'width': 1}
+                    },
+                    {
+                        'x': all_results.index.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+                        'y': all_results['breath_rate'].round(2).tolist(),
+                        'type': 'scatter',
+                        'mode': 'lines',
+                        'name': '原始呼吸率',
+                        'line': {'color': 'gray', 'width': 1}
+                    }
+                ],
+                'layout': {
+                    'title': '呼吸率K线分析 (10分钟间隔)',
+                    'xaxis': {
+                        'title': '时间',
+                        'rangeslider': {'visible': True}
+                    },
+                    'yaxis': {'title': '呼吸率'},
+                    'legend': {'orientation': 'h', 'y': -0.2}
+                }
+            }
+
             # 评估每个段的数据质量
             segment_metrics = []
             for i, results in enumerate(segment_results):
@@ -381,7 +467,9 @@ def upload_files():
             return jsonify({
                 'plot': json.loads(plotly.utils.PlotlyJSONEncoder().encode(fig)),
                 'stats': stats,
-                'quality_metrics': quality_metrics
+                'quality_metrics': quality_metrics,
+                'heart_rate_candlestick': heart_rate_plot,
+                'breath_rate_candlestick': breath_rate_plot
             })
             
         except Exception as e:

@@ -532,3 +532,40 @@ class HeartRateAnalyzer:
         
         # 确保阈值在合理范围内
         return min(max(threshold, base_threshold), max_threshold)
+
+    def generate_candlestick_data(self, results, data_type='heart_rate', interval='10min'):
+        """生成K线图数据
+        
+        Args:
+            results: 分析结果DataFrame
+            data_type: 数据类型，'heart_rate' 或 'breath_rate'
+            interval: 时间间隔，默认10分钟
+            
+        Returns:
+            包含K线图数据的DataFrame，每个时间段包含开盘、最高、最低、收盘值
+        """
+        # 确保索引是datetime类型
+        if not isinstance(results.index, pd.DatetimeIndex):
+            results.index = pd.to_datetime(results.index)
+            
+        # 选择正确的数据列
+        if data_type == 'heart_rate':
+            column = 'corrected_heart_rate'
+        else:
+            column = 'corrected_breath_rate'
+            
+        # 按时间间隔重采样
+        candlestick_data = pd.DataFrame()
+        candlestick_data['open'] = results[column].resample(interval).first()
+        candlestick_data['high'] = results[column].resample(interval).max()
+        candlestick_data['low'] = results[column].resample(interval).min()
+        candlestick_data['close'] = results[column].resample(interval).last()
+        
+        # 删除没有数据的时间段
+        candlestick_data = candlestick_data.dropna()
+        
+        # 添加平均值和数据点数量
+        candlestick_data['avg'] = results[column].resample(interval).mean()
+        candlestick_data['count'] = results[column].resample(interval).count()
+        
+        return candlestick_data

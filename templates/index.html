@@ -46,6 +46,22 @@
                         <div class="card-body">
                             <div id="plot" style="width: 100%;"></div>
                             
+                            <div class="card mt-4">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">K线分析</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-4">
+                                        <h6>心率K线图</h6>
+                                        <div id="heart-rate-candlestick" style="width: 100%; height: 400px;"></div>
+                                    </div>
+                                    <div>
+                                        <h6>呼吸率K线图</h6>
+                                        <div id="breath-rate-candlestick" style="width: 100%; height: 400px;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
                             <div class="row mt-4">
                                 <div class="col-lg-3 col-md-6">
                                     <h6>原始数据统计</h6>
@@ -108,8 +124,14 @@
                         $('#loading').addClass('d-none');
                         $('#results').removeClass('d-none');
                         
-                        // 绘制图表
+                        // 绘制主图表
                         Plotly.newPlot('plot', response.plot.data, response.plot.layout);
+                        
+                        // 绘制心率K线图
+                        Plotly.newPlot('heart-rate-candlestick', response.heart_rate_candlestick.data, response.heart_rate_candlestick.layout);
+                        
+                        // 绘制呼吸率K线图
+                        Plotly.newPlot('breath-rate-candlestick', response.breath_rate_candlestick.data, response.breath_rate_candlestick.layout);
                         
                         // 更新统计信息
                         $('#original-stats').html(`
