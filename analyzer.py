@@ -7,7 +7,7 @@ from io import StringIO
 import signal
 
 class HeartRateAnalyzer:
-    def __init__(self, window_size=15, reliability_threshold=70, correlation_half_window=30, correlation_threshold=0.4):
+    def __init__(self, window_size=15, reliability_threshold=70, correlation_half_window=30, correlation_threshold=0.6):
         self.window_size = window_size
         self.reliability_threshold = reliability_threshold
         self.correlation_half_window = correlation_half_window  # 相关性分析窗口的半径，实际窗口大小为 2*half_window+1
@@ -230,26 +230,18 @@ class HeartRateAnalyzer:
                     results_with_time[['device_time', 'breath_rate']]
                 )
                 
-                # 将结果添加到DataFrame中
+                # 将相关性结果添加到DataFrame中
                 results['correlation'] = correlations
-                
-                # 相关性过滤条件（使用更宽松的标准）
                 results['correlation'] = results['correlation'].fillna(0)  # 填充NaN值
-                high_correlation = results['correlation'] >= self.correlation_threshold
-                medium_correlation = (results['correlation'] >= self.min_correlation_threshold)
                 
-                # 计算相关性的整体统计
-                correlation_mean = results['correlation'].mean()
-                correlation_std = results['correlation'].std()
+                # 根据相关性过滤数据
+                valid_correlation = results['correlation'] >= self.min_correlation_threshold
+                results = results[valid_correlation].copy()
                 
-                # 使用更宽松的过滤条件
-                valid = medium_correlation
-                
-                results = results[valid].copy()
-                
-                # 添加质量标记
-                results['data_quality'] = 'high'
-                results.loc[results['correlation'] < self.correlation_threshold, 'data_quality'] = 'medium'
+                # 标记数据质量
+                results['data_quality'] = 'medium'
+                high_correlation_mask = results['correlation'] >= self.correlation_threshold
+                results.loc[high_correlation_mask, 'data_quality'] = 'high'
                 
                 return results
                 
@@ -324,66 +316,95 @@ class HeartRateAnalyzer:
         
         return scores
 
-    def evaluate_data_quality(self, heart_rate_df, breath_rate_df):
-        """评估心率和呼吸率数据的质量
+    def evaluate_segments_quality(self, segments):
+        """评估已分段数据的质量
         
-        返回：
-            dict: 包含各项质量指标的字典
+        Args:
+            segments: 已经分好的数据段列表，每个段是一个DataFrame
+            
+        Returns:
+            dict: 包含所有段落质量评估结果的字典
         """
-        # 检测数据段
-        time_gaps = heart_rate_df.index.to_series().diff().dt.total_seconds()
-        segment_threshold = 600  # 600秒以上的间隔视为不同段
+        if not segments:
+            return {
+                '总段数': 0,
+                '段落详情': []
+            }
         
-        # 找出大于阈值的时间差的位置
-        gap_positions = time_gaps[time_gaps > segment_threshold].index
-        
-        # 如果没有大于阈值的时间差，整个数据集作为一段
-        if len(gap_positions) == 0:
-            metrics = self._evaluate_single_segment(heart_rate_df, breath_rate_df, 1)
-            metrics['总段数'] = 1
-            return metrics
-            
-        # 分段处理数据
-        segments = []
-        start_idx = 0
-        segment_number = 1
         all_metrics = []
-        
-        # 处理每一段数据
-        for gap_pos in gap_positions:
-            current_pos = heart_rate_df.index.get_indexer([gap_pos])[0]
-            # 提取当前段的数据
-            hr_segment = heart_rate_df.iloc[start_idx:current_pos]
-            br_segment = breath_rate_df.iloc[start_idx:current_pos]
+        for i, segment_data in enumerate(segments, 1):
+            # 从segment_data中提取心率和呼吸率数据
+            heart_rate_df = pd.DataFrame(segment_data, columns=['id', 'heart_rate', 'device_time'])
+            heart_rate_df['heart_rate'] = pd.to_numeric(heart_rate_df['heart_rate'], errors='coerce')
+            heart_rate_df['device_time'] = pd.to_datetime(heart_rate_df['device_time'])
+            heart_rate_df = heart_rate_df.set_index('device_time')
             
-            if len(hr_segment) > 0 and len(br_segment) > 0:
-                metrics = self._evaluate_single_segment(hr_segment, br_segment, segment_number)
-                all_metrics.append(metrics)
-                segment_number += 1
+            # 创建对应的呼吸率数据
+            breath_rate_df = pd.DataFrame(segment_data, columns=['id', 'breath_rate', 'device_time'])
+            breath_rate_df['breath_rate'] = pd.to_numeric(breath_rate_df['breath_rate'], errors='coerce')
+            breath_rate_df['device_time'] = pd.to_datetime(breath_rate_df['device_time'])
+            breath_rate_df = breath_rate_df.set_index('device_time')
             
-            start_idx = current_pos + 1
-        
-        # 处理最后一段数据
-        hr_segment = heart_rate_df.iloc[start_idx:]
-        br_segment = breath_rate_df.iloc[start_idx:]
-        if len(hr_segment) > 0 and len(br_segment) > 0:
-            metrics = self._evaluate_single_segment(hr_segment, br_segment, segment_number)
+            # 评估当前段的质量
+            metrics = self._evaluate_single_segment(heart_rate_df, breath_rate_df, i)
             all_metrics.append(metrics)
         
         # 合并所有段的结果
         combined_metrics = {
-            '总段数': len(all_metrics),
+            '总段数': len(segments),
             '段落详情': all_metrics
         }
         
         return combined_metrics
-        
+
     def _evaluate_single_segment(self, heart_rate_df, breath_rate_df, segment_number):
         """评估单个数据段的质量"""
         quality_metrics = {}
         
         # 添加段落编号
         quality_metrics['段落编号'] = segment_number
+        
+        # 4. 先计算相关性并过滤数据
+        correlations = self.calculate_hr_br_correlation(heart_rate_df.reset_index(), breath_rate_df.reset_index())
+        correlations = correlations.fillna(0)  # 填充NaN值
+        
+        # 根据相关性过滤数据
+        valid_correlation = correlations >= self.min_correlation_threshold
+        filtered_correlations = correlations[valid_correlation]
+        
+        if filtered_correlations.empty:
+            # 如果过滤后没有数据，返回空的评估结果
+            return {
+                '段落编号': segment_number,
+                '数据完整性': {
+                    '总时长(分钟)': 0,
+                    '心率数据点数': 0,
+                    '呼吸率数据点数': 0,
+                    '心率平均采样间隔(秒)': 0,
+                    '呼吸率平均采样间隔(秒)': 0,
+                    '心率数据完整度': 0,
+                    '呼吸率数据完整度': 0
+                },
+                '数据有效性': {
+                    '有效心率数据比例': 0,
+                    '有效呼吸率数据比例': 0
+                },
+                '数据稳定性': {
+                    '心率标准差': 0,
+                    '呼吸率标准差': 0
+                },
+                '数据相关性': {
+                    '心率-呼吸率相关性得分': 0,
+                    '高相关性比例': 0,
+                    '中相关性比例': 0,
+                    '低相关性比例': 0
+                }
+            }
+        
+        # 过滤心率和呼吸率数据
+        valid_times = correlations[valid_correlation].index
+        heart_rate_df = heart_rate_df.loc[valid_times]
+        breath_rate_df = breath_rate_df.loc[valid_times]
         
         # 1. 数据完整性检查
         total_duration = abs((heart_rate_df.index[-1] - heart_rate_df.index[0]).total_seconds() / 60)
@@ -435,12 +456,21 @@ class HeartRateAnalyzer:
             '呼吸率标准差': round(float(breath_rate_std if not pd.isna(breath_rate_std) else 0), 2)
         }
         
-        # 4. 数据相关性
-        correlations = self.calculate_hr_br_correlation(heart_rate_df, breath_rate_df)
-        mean_correlation = float(correlations.mean() if not pd.isna(correlations.mean()) else 0)
+        # 计算不同相关性水平的比例
+        high_correlation = filtered_correlations >= self.correlation_threshold
+        medium_correlation = (filtered_correlations >= self.min_correlation_threshold) & (filtered_correlations < self.correlation_threshold)
+        low_correlation = filtered_correlations < self.min_correlation_threshold
+        
+        total_points = len(filtered_correlations)
+        high_ratio = (high_correlation.sum() / total_points * 100) if total_points > 0 else 0
+        medium_ratio = (medium_correlation.sum() / total_points * 100) if total_points > 0 else 0
+        low_ratio = (low_correlation.sum() / total_points * 100) if total_points > 0 else 0
         
         quality_metrics['数据相关性'] = {
-            '心率-呼吸率相关性得分': round(mean_correlation, 2)
+            '心率-呼吸率相关性得分': round(filtered_correlations.mean(), 2),
+            '高相关性比例': round(high_ratio, 2),
+            '中相关性比例': round(medium_ratio, 2),
+            '低相关性比例': round(low_ratio, 2)
         }
         
         return quality_metrics

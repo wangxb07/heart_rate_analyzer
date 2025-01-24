@@ -299,11 +299,24 @@ def upload_files():
             # 生成统计报告（合并所有段的数据）
             all_results = pd.concat([analyzer.analyze(segment) for segment, _, _, _, _ in valid_segments])
             
-            # 评估数据质量
-            quality_metrics = analyzer.evaluate_data_quality(
-                all_results[['heart_rate']].rename(columns={'heart_rate': 'heart_rate'}),
-                all_results[['breath_rate']].rename(columns={'breath_rate': 'breath_rate'})
-            )
+            # 评估每个段的数据质量
+            segment_metrics = []
+            for i, (segment_data, count, span, hr, br) in enumerate(valid_segments):
+                # 分析当前段的数据
+                results = analyzer.analyze(segment_data)
+                if not results.empty:
+                    # 评估当前段的质量
+                    heart_rate_df = results[['heart_rate']].copy()
+                    breath_rate_df = results[['breath_rate']].copy()
+                    
+                    metrics = analyzer._evaluate_single_segment(heart_rate_df, breath_rate_df, i + 1)
+                    segment_metrics.append(metrics)
+            
+            # 合并所有段的评估结果
+            quality_metrics = {
+                '总段数': len(segment_metrics),
+                '段落详情': segment_metrics
+            }
             
             stats = {
                 'original_stats': {
