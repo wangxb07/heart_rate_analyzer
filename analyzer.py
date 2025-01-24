@@ -7,8 +7,8 @@ from io import StringIO
 import signal
 
 class HeartRateAnalyzer:
-    def __init__(self, window_size=15, reliability_threshold=70, correlation_half_window=30, correlation_threshold=0.3):
-        self.window_size = window_size
+    def __init__(self, window_size=10, reliability_threshold=70, correlation_half_window=20, correlation_threshold=0.3):
+        self.window_size = window_size  # 用于移动平均和指数加权移动平均的窗口大小
         self.reliability_threshold = reliability_threshold
         self.correlation_half_window = correlation_half_window  # 相关性分析窗口的半径，实际窗口大小为 2*half_window+1
         self.normal_heart_rate = 68  # 正常心率值
@@ -211,8 +211,6 @@ class HeartRateAnalyzer:
                 results['device_time'] = heart_rate_df['device_time']
                 results['heart_rate'] = heart_rate_df['heart_rate']
                 results['breath_rate'] = breath_rate_df['breath_rate']
-                print("\n1. 初始DataFrame:")
-                print(results.head())
                 
                 # 设置时间戳为索引
                 results = results.set_index('device_time')
@@ -222,21 +220,15 @@ class HeartRateAnalyzer:
                 
                 # 确保结果按时间排序
                 results = results.sort_index()
-                print("\n2. 设置索引后的DataFrame:")
-                print(results.head())
                 
                 # 修正呼吸率数据
                 results['corrected_breath_rate'] = self.correct_breath_rate(results['breath_rate'])
                 
                 # 计算可靠性分数
                 results['reliability_score'] = self.calculate_reliability_scores(results[['heart_rate']])
-                print("\n3. 添加可靠性分数后的DataFrame:")
-                print(results.head())
                 
                 # 修正心率数据
                 results['corrected_heart_rate'] = self.correct_heart_rate(results['heart_rate'])
-                print("\n4. 添加修正后心率的DataFrame:")
-                print(results.head())
                 
                 # 临时重置索引以访问device_time列
                 results_with_time = results.reset_index()
@@ -250,11 +242,9 @@ class HeartRateAnalyzer:
                 # 将相关性结果添加到DataFrame中
                 results['correlation'] = correlations
                 results['correlation'] = results['correlation'].fillna(0)  # 填充NaN值
-                print("\n5. 添加相关性分数后的DataFrame:")
-                print(results.head())
                 
                 # 计算每个点的动态相关性阈值
-                results['dynamic_correlation_threshold'] = results['heart_rate'].apply(self._calculate_dynamic_correlation_threshold)
+                results['dynamic_correlation_threshold'] = results['corrected_heart_rate'].apply(self._calculate_dynamic_correlation_threshold)
                 
                 # 根据可靠性和动态相关性阈值一起过滤数据
                 valid_data = (
@@ -265,25 +255,15 @@ class HeartRateAnalyzer:
                 
                 # 标记数据质量
                 results['data_quality'] = 'high'  # 因为我们已经过滤掉了所有低质量数据
-                print("\n6. 最终过滤后的DataFrame:")
-                print(results.head())
                 
                 return results
                 
             except Exception as e:
-                import sys
-                exc_type, exc_value, exc_traceback = sys.exc_info()
                 print(f"创建结果DataFrame时出错: {str(e)}")
-                print(f"错误位置: 第 {exc_traceback.tb_lineno} 行")
                 return pd.DataFrame()
             
         except Exception as e:
-            import traceback
             print(f"分析数据时出错: {str(e)}")
-            print("错误详情:")
-            tb = traceback.extract_tb(e.__traceback__)
-            print(f"文件 {tb[-1].filename}, 第 {tb[-1].lineno} 行")
-            print(f"出错代码: {tb[-1].line}")
             return pd.DataFrame()
 
     def correct_heart_rate(self, heart_rate):
@@ -293,8 +273,15 @@ class HeartRateAnalyzer:
         
         # 再使用指数加权移动平均获得更平滑的结果
         final_heart_rate = smoothed_heart_rate.ewm(span=self.window_size).mean()
-        
+
         return final_heart_rate
+
+    def apply_moving_average(self, series, window_size=None):
+        """应用移动平均来平滑数据"""
+        if window_size is None:
+            window_size = self.window_size
+        result = series.rolling(window=window_size, center=True, min_periods=1).mean()
+        return result
 
     def correct_breath_rate(self, breath_rate):
         """修正呼吸率数据，使用指数加权移动平均
@@ -312,10 +299,6 @@ class HeartRateAnalyzer:
         final_breath_rate = smoothed_breath_rate.ewm(span=self.window_size).mean()
         
         return final_breath_rate
-
-    def apply_moving_average(self, series, window_size=5):
-        """应用移动平均来平滑数据"""
-        return series.rolling(window=window_size, center=True, min_periods=1).mean()
 
     def calculate_reliability_scores(self, heart_rate_df):
         """计算心率数据的可靠性分数"""
@@ -503,7 +486,7 @@ class HeartRateAnalyzer:
         }
         
         # 计算每个点的动态相关性阈值
-        dynamic_thresholds = heart_rate_df['heart_rate'].apply(self._calculate_dynamic_correlation_threshold)
+        dynamic_thresholds = heart_rate_df['corrected_heart_rate'].apply(self._calculate_dynamic_correlation_threshold)
         
         # 计算不同相关性水平的比例
         high_correlation = filtered_correlations >= dynamic_thresholds
@@ -544,9 +527,8 @@ class HeartRateAnalyzer:
         max_threshold = 0.9
         
         # 使用幂函数计算阈值
-        # 幂指数增加到8使曲线更陡峭
-        # 缩放因子改为0.3，这样30%偏差时就接近最大值
-        threshold = base_threshold + (max_threshold - base_threshold) * min(1, (deviation / 0.3) ** 11)
+        power_term = (deviation / 0.3) ** 11
+        threshold = base_threshold + (max_threshold - base_threshold) * min(1, power_term)
         
         # 确保阈值在合理范围内
         return min(max(threshold, base_threshold), max_threshold)

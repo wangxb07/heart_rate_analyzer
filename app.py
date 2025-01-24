@@ -1,14 +1,12 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify
 import pandas as pd
 import numpy as np
-from datetime import datetime
 import plotly.graph_objects as go
 import plotly.utils
-import json
 import os
-from werkzeug.utils import secure_filename
 from analyzer import HeartRateAnalyzer
 import plotly.subplots
+import json
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -147,6 +145,7 @@ def upload_files():
             
             # 分析所有段，筛选出有效的段
             valid_segments = []
+            segment_results = []  # 存储每个段的分析结果
             analyzer = HeartRateAnalyzer()
             
             print("\n开始分析所有数据段:")
@@ -176,21 +175,25 @@ def upload_files():
                     print(f"  - 平均呼吸率: {avg_breath_rate:.1f}")
                     
                     # 检查数据质量
-                    if valid_count >= 10 and time_span >= 1:  # 至少100个点且跨度至少5分钟
+                    if valid_count >= 100 and time_span >= 1:  # 至少100个点且跨度至少5分钟
                         valid_segments.append((segment, valid_count, time_span, avg_heart_rate, avg_breath_rate))
+                        segment_results.append(results)  # 存储分析结果
                         print(f"  - 状态: 有效")
                     else:
-                        print(f"  - 状态: 无效 (需要>=100个点且>=5分钟)")
+                        print(f"  - 状态: 无效 (需要>=100个点且>=1分钟)")
                 except Exception as e:
                     print(f"段 {i + 1} 处理出错: {str(e)}")
                     continue
             
             if not valid_segments:
-                return jsonify({'error': '没有找到足够的有效数据段（每段至少需要100个有效数据点且时间跨度>=5分钟）'}), 400
+                return jsonify({'error': '没有找到足够的有效数据段（每段至少需要100个有效数据点且时间跨度>=1分钟）'}), 400
             
             # 按有效点数排序并限制最多5段
-            valid_segments.sort(key=lambda x: x[1], reverse=True)
-            segments_to_plot = [segment for segment, _, _, _, _ in valid_segments[:5]]
+            # 同时对segment_results进行相应的排序
+            sorted_indices = sorted(range(len(valid_segments)), key=lambda k: valid_segments[k][1], reverse=True)
+            valid_segments = [valid_segments[i] for i in sorted_indices[:5]]
+            segment_results = [segment_results[i] for i in sorted_indices[:5]]
+            segments_to_plot = [segment for segment, _, _, _, _ in valid_segments]
             
             print(f"\n将显示 {len(segments_to_plot)} 个有效数据段")
             
@@ -200,24 +203,26 @@ def upload_files():
                 cols=1,
                 subplot_titles=[
                     f"数据段 {i+1} (有效点数: {count}, 时长: {span:.1f}分钟, 平均心率: {hr:.1f}, 平均呼吸率: {br:.1f})" 
-                    for i, (_, count, span, hr, br) in enumerate(valid_segments[:5])
+                    for i, (_, count, span, hr, br) in enumerate(valid_segments)
                 ],
                 specs=[[{"secondary_y": True}] for _ in range(len(segments_to_plot))],
                 vertical_spacing=0.1
             )
             
             # 分析每个段并绘图
-            for segment_idx, segment_data in enumerate(segments_to_plot):
+            all_results = pd.DataFrame()  # 用于收集所有段的结果
+            
+            for segment_idx, results in enumerate(segment_results):
                 print(f"\n正在处理第 {segment_idx + 1}/{len(segments_to_plot)} 段数据")
                 row = segment_idx + 1
                 
-                # 分析当前段的数据
-                analyzer = HeartRateAnalyzer()
-                results = analyzer.analyze(segment_data)
                 if results.empty:
                     print(f"段 {segment_idx + 1} 没有有效数据，跳过")
                     continue
 
+                # 收集这个段的结果
+                all_results = pd.concat([all_results, results])
+                
                 # 打印数据统计
                 print(f"\n=== 段 {segment_idx + 1} 数据统计 ===")
                 print(f"数据点总数: {len(results)}")
@@ -326,14 +331,9 @@ def upload_files():
                 # 添加评分的y轴范围
                 fig.update_yaxes(secondary_y=True, row=i+1, col=1, range=[0, 100])
             
-            # 生成统计报告（合并所有段的数据）
-            all_results = pd.concat([analyzer.analyze(segment) for segment, _, _, _, _ in valid_segments])
-            
             # 评估每个段的数据质量
             segment_metrics = []
-            for i, (segment_data, count, span, hr, br) in enumerate(valid_segments):
-                # 分析当前段的数据
-                results = analyzer.analyze(segment_data)
+            for i, results in enumerate(segment_results):
                 if not results.empty:
                     # 评估当前段的质量
                     heart_rate_df = results[['heart_rate']].copy()
